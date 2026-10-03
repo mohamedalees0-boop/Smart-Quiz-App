@@ -1,0 +1,135 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#16293a">
+    <meta name="description" content="A quick, interactive quiz on web development, Python, and AI.">
+    <title>Smart Quiz App</title>
+    <link rel="stylesheet" href="style.css">
+    <script src="script.js" defer></script>
+  </head>
+  <body>
+    <main class="app-shell">
+      <header class="site-header">
+        <a class="brand" href="#" aria-label="Smart Quiz home">
+          <span class="brand-mark" aria-hidden="true">S<span>Q</span></span>
+          <span class="brand-name">smart<span>quiz</span></span>
+        </a>
+        <span class="header-note" id="server-status" role="status"><span class="status-dot" aria-hidden="true"></span><span id="server-status-text">Connecting to quiz service...</span></span>
+      </header>
+      <div class="api-error" id="api-error" role="alert" hidden></div>
+
+      <section class="screen welcome-screen" id="welcome-screen" aria-labelledby="welcome-title">
+        <div class="welcome-copy">
+          <p class="eyebrow"><span class="eyebrow-line" aria-hidden="true"></span> YOUR QUICK KNOWLEDGE CHECK</p>
+          <h1 id="welcome-title">Curiosity<br>looks good <span>on you.</span></h1>
+          <p class="intro">Ten questions, a few different topics, and one satisfying brain stretch. Ready when you are.</p>
+          <div class="quiz-facts" aria-label="Quiz details">
+            <div class="fact"><span class="fact-value">10</span><span class="fact-label">questions</span></div>
+            <span class="fact-divider" aria-hidden="true"></span>
+            <div class="fact"><span class="fact-value">5</span><span class="fact-label">topics</span></div>
+            <span class="fact-divider" aria-hidden="true"></span>
+            <div class="fact"><span class="fact-value">~5</span><span class="fact-label">minutes</span></div>
+          </div>
+          <button class="button button-primary start-button" id="start-button" type="button">
+            Start the quiz <span class="button-arrow" aria-hidden="true">&#8594;</span>
+          </button>
+          <p class="quiet-note">No timer. Just you and what you know.</p>
+        </div>
+        <aside class="welcome-art" aria-label="Quiz topics: HTML, CSS, JavaScript, Python, and AI">
+          <div class="art-topline"><span>THE KNOWLEDGE MIX</span><span class="art-spark" aria-hidden="true">&#10022;</span></div>
+          <div class="topic-stack">
+            <div class="topic-row topic-html"><span class="topic-icon" aria-hidden="true">&lt;/&gt;</span><span>HTML</span><span class="topic-detail">structure</span></div>
+            <div class="topic-row topic-css"><span class="topic-icon" aria-hidden="true">&#10038;</span><span>CSS</span><span class="topic-detail">style</span></div>
+            <div class="topic-row topic-js"><span class="topic-icon" aria-hidden="true">JS</span><span>JavaScript</span><span class="topic-detail">interaction</span></div>
+            <div class="topic-row topic-python"><span class="topic-icon" aria-hidden="true">&#9678;</span><span>Python</span><span class="topic-detail">logic</span></div>
+            <div class="topic-row topic-ai"><span class="topic-icon" aria-hidden="true">&#10022;</span><span>Artificial intelligence</span><span class="topic-detail">ideas</span></div>
+          </div>
+          <div class="art-caption"><span class="caption-rule" aria-hidden="true"></span> A little bit of everything.</div>
+        </aside>
+        <section class="history-section" aria-labelledby="history-title">
+          <div class="history-heading">
+            <h2 id="history-title">Previous attempts</h2>
+            <span class="history-count" id="history-count"></span>
+          </div>
+          <div class="history-list" id="history-list" aria-live="polite">
+            <p class="history-empty">Loading attempt history...</p>
+          </div>
+        </section>
+      </section>
+
+      <section class="screen quiz-screen" id="quiz-screen" aria-labelledby="question-title" hidden>
+        <div class="quiz-topline">
+          <button class="back-button" id="back-button" type="button"><span aria-hidden="true">&#8592;</span> Back to Home</button>
+          <span class="eyebrow"><span class="eyebrow-line" aria-hidden="true"></span> YOUR QUICK KNOWLEDGE CHECK</span>
+          <div class="score-pill" aria-live="polite"><span class="score-star" aria-hidden="true">&#9733;</span> Score <strong id="score-value">--</strong></div>
+        </div>
+        <div class="progress-section">
+          <div class="progress-labels"><span id="question-counter">Question 1 of 10</span><span id="progress-percent">10%</span></div>
+          <div class="progress-track" id="progress-track" role="progressbar" aria-label="Quiz progress" aria-valuemin="0" aria-valuemax="10" aria-valuenow="0">
+            <div class="progress-fill" id="progress-fill"></div>
+          </div>
+        </div>
+        <div class="question-content" aria-live="polite">
+          <span class="topic-tag" id="question-topic">HTML</span>
+          <h1 id="question-title" tabindex="-1"></h1>
+          <p class="answer-prompt">Choose one answer</p>
+          <div class="answer-list" id="answer-list" role="group" aria-label="Answer options"></div>
+          <div class="feedback" id="feedback" role="status" aria-live="polite" aria-atomic="true" hidden></div>
+        </div>
+        <div class="quiz-footer">
+          <span class="footer-hint"><span aria-hidden="true">&#10022;</span> Take your best guess</span>
+          <button class="skip-button" id="skip-button" type="button">Skip question</button>
+          <button class="button button-primary next-button" id="next-button" type="button" disabled>
+            Next Question <span class="button-arrow" aria-hidden="true">&#8594;</span>
+          </button>
+        </div>
+      </section>
+
+      <section class="screen results-screen" id="results-screen" aria-labelledby="results-title" hidden>
+        <div class="results-content">
+          <div class="result-emblem" id="result-emblem" aria-hidden="true"><span>&#10022;</span></div>
+          <p class="eyebrow"><span class="eyebrow-line" aria-hidden="true"></span> QUIZ COMPLETE</p>
+          <h1 id="results-title">Nicely done.</h1>
+          <p class="result-message" id="result-message"></p>
+          <div class="result-breakdown" aria-label="Quiz result summary">
+            <div class="result-metric"><span>Total Questions</span><strong id="result-total">0</strong></div>
+            <div class="result-metric"><span>Correct Answers</span><strong id="result-correct">0</strong></div>
+            <div class="result-metric"><span>Incorrect Answers</span><strong id="result-incorrect">0</strong></div>
+            <div class="result-metric"><span>Unanswered Questions</span><strong id="result-unanswered">0</strong></div>
+          </div>
+          <div class="result-score" aria-label="Final quiz score">
+            <span class="result-score-number" id="final-score">0/10</span>
+            <span class="result-score-divider" aria-hidden="true"></span>
+            <span class="result-score-percent" id="final-percent">0%</span>
+          </div>
+          <p class="result-caption">Final Score / Percentage</p>
+          <p class="pass-status" id="pass-status" hidden></p>
+          <div class="result-actions">
+            <button class="button button-secondary" id="review-answers-button" type="button">Review Answers</button>
+            <button class="button button-primary restart-button" id="restart-button" type="button">
+              <span class="restart-icon" aria-hidden="true">&#8635;</span> Retry Quiz
+            </button>
+            <button class="button button-quiet" id="results-home-button" type="button">Back to Home</button>
+          </div>
+        </div>
+      </section>
+
+      <section class="screen review-screen" id="review-screen" aria-labelledby="review-title" hidden>
+        <div class="review-topline">
+          <button class="back-button" id="review-back-button" type="button">&#8592; Back to Results</button>
+          <span class="eyebrow"><span class="eyebrow-line" aria-hidden="true"></span> ANSWER REVIEW</span>
+          <button class="button button-quiet review-home-button" id="review-home-button" type="button">Back to Home</button>
+        </div>
+        <div class="review-heading">
+          <h1 id="review-title">Review Answers</h1>
+          <p class="review-summary" id="review-summary"></p>
+        </div>
+        <div class="review-list" id="review-list" aria-live="polite"></div>
+      </section>
+
+      <footer class="site-footer"><span>SMART QUIZ</span><span>Made for curious minds</span></footer>
+    </main>
+  </body>
+</html>
