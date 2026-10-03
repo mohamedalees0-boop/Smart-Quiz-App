@@ -1,5 +1,6 @@
 from datetime import datetime, timezone
 from pathlib import Path
+import re
 import sqlite3
 
 from flask import Flask, jsonify, request, send_from_directory
@@ -9,6 +10,16 @@ BACKEND_DIR = Path(__file__).resolve().parent
 FRONTEND_DIR = BACKEND_DIR.parent / "frontend"
 DEFAULT_DATABASE_PATH = BACKEND_DIR / "quiz.db"
 ANSWER_LETTERS = ("A", "B", "C", "D")
+DEFAULT_PAGE_SIZE = 25
+MAX_PAGE_SIZE = 100
+SENSITIVE_COLUMN_PATTERN = re.compile(
+    r"(?:^|_)(?:password|passwd|secret|token|credential|email|phone|mobile|address|"
+    r"ssn|social_security|username|user_name|user_id|person_id|customer_id|account_id|"
+    r"employee_id|name|first_name|last_name|full_name|birth_date|birthdate|"
+    r"date_of_birth|dob|api_key|access_key|private_key|authorization|contact|"
+    r"location|ip|ip_address|user_agent)(?:_|$)",
+    re.IGNORECASE,
+)
 
 SEED_QUESTIONS = (
     (
@@ -118,6 +129,46 @@ def connect_database(database_path: str) -> sqlite3.Connection:
     connection = sqlite3.connect(database_path)
     connection.row_factory = sqlite3.Row
     return connection
+
+
+def connect_database_readonly(database_path: str) -> sqlite3.Connection:
+    resolved_path = Path(database_path).resolve()
+    if not resolved_path.is_file():
+        raise sqlite3.OperationalError("Configured SQLite database does not exist.")
+    database_uri = f"file:{resolved_path.as_posix()}?mode=ro"
+    connection = sqlite3.connect(database_uri, uri=True)
+    connection.row_factory = sqlite3.Row
+    return connection
+
+
+def quote_identifier(identifier: str) -> str:
+    return '"' + identifier.replace('"', '""') + '"'
+
+
+def database_table_names(connection: sqlite3.Connection) -> list[str]:
+    rows = connection.execute(
+        """
+        SELECT name FROM sqlite_master
+        WHERE type = 'table' AND name NOT LIKE 'sqlite_%'
+        ORDER BY name
+        """
+    ).fetchall()
+    return [row["name"] for row in rows]
+
+
+def is_sensitive_column(column_name: str) -> bool:
+    normalized = re.sub(r"(?<=[a-z0-9])(?=[A-Z])", "_", column_name).lower()
+    return bool(SENSITIVE_COLUMN_PATTERN.search(normalized))
+
+
+def serialize_database_value(value):
+    if isinstance(value, (bytes, bytearray, memoryview)):
+        return f"[BLOB: {len(value)} bytes]"
+    return value
+
+
+def is_local_request() -> bool:
+    return request.remote_addr in {"127.0.0.1", "::1", "::ffff:127.0.0.1"}
 
 
 def initialize_database(database_path: str) -> None:
@@ -270,6 +321,108 @@ def create_app(
     @app.get("/")
     def serve_home():
         return send_from_directory(FRONTEND_DIR, "index.html")
+
+    @app.get("/admin/database")
+    def serve_database_viewer():
+        if not is_local_request():
+            return "Database Viewer is available only from this computer.", 403
+        return send_from_directory(FRONTEND_DIR, "database.html")
+
+    @app.get("/api/admin/tables")
+    def get_database_tables():
+        if not is_local_request():
+            return jsonify({"error": "Database Viewer is restricted to local access."}), 403
+
+        connection = connect_database_readonly(app.config["DATABASE_PATH"])
+        try:
+            tables = []
+            for table_name in database_table_names(connection):
+                count = connection.execute(
+                    f"SELECT COUNT(*) FROM {quote_identifier(table_name)}"
+                ).fetchone()[0]
+                tables.append({"name": table_name, "record_count": count})
+        finally:
+            connection.close()
+        return jsonify({"tables": tables, "database": "configured SQLite database"})
+
+    @app.get("/api/admin/tables/<string:table_name>")
+    def get_database_table(table_name: str):
+        if not is_local_request():
+            return jsonify({"error": "Database Viewer is restricted to local access."}), 403
+
+        try:
+            page_number = int(request.args.get("page", "1"))
+            page_size = int(request.args.get("page_size", str(DEFAULT_PAGE_SIZE)))
+        except ValueError:
+            return jsonify({"error": "Page and page_size must be integers."}), 400
+        if page_number < 1:
+            return jsonify({"error": "Page must be at least 1."}), 400
+        if not 1 <= page_size <= MAX_PAGE_SIZE:
+            return jsonify({"error": f"page_size must be between 1 and {MAX_PAGE_SIZE}."}), 400
+
+        connection = connect_database_readonly(app.config["DATABASE_PATH"])
+        try:
+            if table_name not in database_table_names(connection):
+                return jsonify({"error": "Table not found."}), 404
+
+            quoted_table = quote_identifier(table_name)
+            column_rows = connection.execute(
+                f"PRAGMA table_info({quoted_table})"
+            ).fetchall()
+            foreign_keys = [
+                dict(row)
+                for row in connection.execute(
+                    f"PRAGMA foreign_key_list({quoted_table})"
+                ).fetchall()
+            ]
+            columns = [
+                {
+                    "name": row["name"],
+                    "type": row["type"],
+                    "not_null": bool(row["notnull"]),
+                    "primary_key_order": row["pk"],
+                    "redacted": is_sensitive_column(row["name"]),
+                }
+                for row in column_rows
+            ]
+            total_records = connection.execute(
+                f"SELECT COUNT(*) FROM {quoted_table}"
+            ).fetchone()[0]
+            primary_key_columns = [
+                quote_identifier(row["name"])
+                for row in sorted(column_rows, key=lambda row: row["pk"])
+                if row["pk"]
+            ]
+            order_by = ", ".join(primary_key_columns) if primary_key_columns else "rowid"
+            records = connection.execute(
+                f"SELECT * FROM {quoted_table} ORDER BY {order_by} LIMIT ? OFFSET ?",
+                (page_size, (page_number - 1) * page_size),
+            ).fetchall()
+            sensitive_columns = {
+                column["name"] for column in columns if column["redacted"]
+            }
+            serialized_records = [
+                {
+                    key: "[REDACTED]" if key in sensitive_columns else serialize_database_value(value)
+                    for key, value in dict(record).items()
+                }
+                for record in records
+            ]
+        finally:
+            connection.close()
+
+        return jsonify(
+            {
+                "table": table_name,
+                "columns": columns,
+                "foreign_keys": foreign_keys,
+                "records": serialized_records,
+                "total_records": total_records,
+                "page": page_number,
+                "page_size": page_size,
+                "total_pages": (total_records + page_size - 1) // page_size,
+            }
+        )
 
     @app.get("/<path:filename>")
     def serve_frontend_file(filename: str):

@@ -202,6 +202,129 @@ class QuizApiTests(unittest.TestCase):
         response = self.client.get("/api/results/9999")
         self.assertEqual(response.status_code, 404)
 
+    def test_admin_viewer_lists_every_discovered_table(self):
+        connection = sqlite3.connect(self.database_path)
+        expected_tables = {
+            row[0]
+            for row in connection.execute(
+                "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'"
+            )
+        }
+        expected_counts = {
+            table: connection.execute(f'SELECT COUNT(*) FROM "{table}"').fetchone()[0]
+            for table in expected_tables
+        }
+        connection.close()
+
+        response = self.client.get("/api/admin/tables")
+        self.assertEqual(response.status_code, 200)
+        tables = response.get_json()["tables"]
+        self.assertEqual({table["name"] for table in tables}, expected_tables)
+        self.assertEqual(
+            {table["name"]: table["record_count"] for table in tables},
+            expected_counts,
+        )
+
+        for table_name in expected_tables:
+            table_response = self.client.get(f"/api/admin/tables/{table_name}")
+            self.assertEqual(table_response.status_code, 200)
+            table_data = table_response.get_json()
+            self.assertTrue(table_data["columns"])
+            self.assertEqual(table_data["total_records"], expected_counts[table_name])
+            self.assertEqual(len(table_data["records"]), expected_counts[table_name])
+            self.assertEqual(table_data["page"], 1)
+
+    def test_admin_viewer_paginates_with_parameterized_limits(self):
+        first_page = self.client.get("/api/admin/tables/questions?page=1&page_size=4")
+        third_page = self.client.get("/api/admin/tables/questions?page=3&page_size=4")
+        self.assertEqual(first_page.status_code, 200)
+        self.assertEqual(third_page.status_code, 200)
+        self.assertEqual(len(first_page.get_json()["records"]), 4)
+        self.assertEqual(len(third_page.get_json()["records"]), 2)
+        self.assertEqual(third_page.get_json()["total_records"], 10)
+        self.assertEqual(third_page.get_json()["total_pages"], 3)
+        self.assertEqual(first_page.get_json()["records"][0]["id"], 1)
+        self.assertEqual(third_page.get_json()["records"][0]["id"], 9)
+
+    def test_admin_viewer_reports_empty_tables_and_keeps_database_read_only(self):
+        before = self.client.get("/api/admin/tables").get_json()
+        attempts = self.client.get("/api/admin/tables/quiz_attempts").get_json()
+        reviews = self.client.get("/api/admin/tables/quiz_attempt_reviews").get_json()
+        after = self.client.get("/api/admin/tables").get_json()
+
+        self.assertEqual(attempts["total_records"], 0)
+        self.assertEqual(attempts["records"], [])
+        self.assertEqual(reviews["total_records"], 0)
+        self.assertEqual(reviews["records"], [])
+        self.assertEqual(before, after)
+        self.assertEqual(self.client.get("/api/results").get_json(), [])
+
+    def test_admin_viewer_rejects_unknown_tables_and_invalid_pagination(self):
+        unknown = self.client.get("/api/admin/tables/questions%3BDROP%20TABLE%20questions")
+        invalid_page = self.client.get("/api/admin/tables/questions?page=0")
+        invalid_page_size = self.client.get("/api/admin/tables/questions?page_size=101")
+        invalid_number = self.client.get("/api/admin/tables/questions?page=one")
+        self.assertEqual(unknown.status_code, 404)
+        self.assertEqual(invalid_page.status_code, 400)
+        self.assertEqual(invalid_page_size.status_code, 400)
+        self.assertEqual(invalid_number.status_code, 400)
+
+    def test_admin_viewer_redacts_sensitive_columns(self):
+        connection = sqlite3.connect(self.database_path)
+        connection.execute(
+            "CREATE TABLE admin_test (id INTEGER PRIMARY KEY, user_id INTEGER, password_hash TEXT, email TEXT, api_key TEXT, note TEXT)"
+        )
+        connection.execute(
+            "INSERT INTO admin_test (user_id, password_hash, email, api_key, note) VALUES (?, ?, ?, ?, ?)",
+            (42, "hashed-value", "person@example.test", "secret-token", "visible"),
+        )
+        connection.commit()
+        connection.close()
+
+        response = self.client.get("/api/admin/tables/admin_test")
+        self.assertEqual(response.status_code, 200)
+        result = response.get_json()
+        self.assertEqual(
+            result["records"][0],
+            {
+                "id": 1,
+                "user_id": "[REDACTED]",
+                "password_hash": "[REDACTED]",
+                "email": "[REDACTED]",
+                "api_key": "[REDACTED]",
+                "note": "visible",
+            },
+        )
+        self.assertTrue(all(column["redacted"] for column in result["columns"] if column["name"] in {"user_id", "password_hash", "email", "api_key"}))
+
+    def test_admin_viewer_endpoints_are_loopback_only(self):
+        tables_response = self.client.get(
+            "/api/admin/tables", environ_overrides={"REMOTE_ADDR": "203.0.113.10"}
+        )
+        records_response = self.client.get(
+            "/api/admin/tables/questions", environ_overrides={"REMOTE_ADDR": "203.0.113.10"}
+        )
+        page_response = self.client.get(
+            "/admin/database", environ_overrides={"REMOTE_ADDR": "203.0.113.10"}
+        )
+        self.assertEqual(tables_response.status_code, 403)
+        self.assertEqual(records_response.status_code, 403)
+        self.assertEqual(page_response.status_code, 403)
+        page_response = self.client.get("/admin/database")
+        self.assertEqual(page_response.status_code, 200)
+        page_response.close()
+
+    def test_admin_viewer_reports_database_errors(self):
+        self.app.config["DATABASE_PATH"] = str(
+            Path(self.temporary_directory.name) / "unavailable.db"
+        )
+        response = self.client.get("/api/admin/tables")
+        self.assertEqual(response.status_code, 500)
+        self.assertEqual(
+            response.get_json(),
+            {"error": "The quiz database is temporarily unavailable."},
+        )
+
     def test_rejects_non_json_and_malformed_json(self):
         non_json = self.client.post("/api/submit", data="answers")
         malformed = self.client.post(

@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#16293a">
+    <meta name="description" content="Read-only inspection of the Smart Quiz SQLite database.">
+    <title>Database Viewer · Smart Quiz</title>
+    <link rel="stylesheet" href="/style.css">
+    <script src="/database-viewer.js" defer></script>
+  </head>
+  <body class="database-body">
+    <main class="app-shell database-app">
+      <header class="site-header">
+        <a class="brand" href="/" aria-label="Smart Quiz home">
+          <span class="brand-mark" aria-hidden="true">S<span>Q</span></span>
+          <span class="brand-name">smart<span>quiz</span></span>
+        </a>
+        <a class="header-action" href="/">Back to Quiz</a>
+      </header>
+
+      <section class="database-content" aria-labelledby="database-title">
+        <p class="eyebrow"><span class="eyebrow-line" aria-hidden="true"></span> LOCAL DATABASE</p>
+        <div class="database-heading-row">
+          <div>
+            <h1 id="database-title">Database Viewer</h1>
+            <p class="database-intro">Read-only view of the quiz database configured for this app.</p>
+          </div>
+          <button class="button button-secondary refresh-database" id="refresh-database" type="button">
+            <span aria-hidden="true">&#8635;</span> Refresh
+          </button>
+        </div>
+
+        <div class="database-toolbar">
+          <label for="table-select">Database table</label>
+          <select id="table-select" disabled>
+            <option value="">Loading tables...</option>
+          </select>
+          <span class="database-count" id="record-count" aria-live="polite"></span>
+        </div>
+        <p class="database-relationships" id="database-relationships" hidden></p>
+
+        <div class="database-message" id="database-message" role="status" aria-live="polite" hidden></div>
+        <div class="database-table-wrap" id="database-table-wrap" hidden>
+          <table class="database-table">
+            <caption id="table-caption"></caption>
+            <thead id="database-thead"></thead>
+            <tbody id="database-tbody"></tbody>
+          </table>
+        </div>
+
+        <nav class="database-pagination" aria-label="Database table pagination">
+          <button class="button button-quiet" id="previous-page" type="button" disabled>Previous</button>
+          <span id="page-indicator" aria-live="polite">Page 0 of 0</span>
+          <button class="button button-quiet" id="next-page" type="button" disabled>Next</button>
+        </nav>
+      </section>
+
+      <footer class="site-footer"><span>SMART QUIZ</span><span>Read-only database inspection</span></footer>
+    </main>
+  </body>
+</html>
