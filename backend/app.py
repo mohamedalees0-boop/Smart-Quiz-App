@@ -1,3 +1,4 @@
+import os
 from datetime import datetime, timezone
 from pathlib import Path
 import re
@@ -8,7 +9,9 @@ from flask import Flask, jsonify, request, send_from_directory
 
 BACKEND_DIR = Path(__file__).resolve().parent
 FRONTEND_DIR = BACKEND_DIR.parent / "frontend"
-DEFAULT_DATABASE_PATH = BACKEND_DIR / "quiz.db"
+DEFAULT_DATABASE_PATH = (
+    Path("/tmp/smart_quiz.db") if os.getenv("VERCEL") else BACKEND_DIR / "quiz.db"
+)
 ANSWER_LETTERS = ("A", "B", "C", "D")
 DEFAULT_PAGE_SIZE = 25
 MAX_PAGE_SIZE = 100
